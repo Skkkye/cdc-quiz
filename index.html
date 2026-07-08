@@ -201,17 +201,53 @@ function restoreCode(){
     startScreen();
   }catch(e){ alert('恢复失败：' + e.message); }
 }
+/* ---------- 从 GitHub Pages 上的 progress.json 自动读取（跨设备同步） ---------- */
+let remoteChecked = false, remoteFound = false;
+async function syncFromRemote(){
+  try{
+    const r = await fetch('./progress.json?t=' + Date.now(), {cache:'no-store'});
+    remoteChecked = true;
+    if(!r.ok) return;
+    const d = JSON.parse(await r.text());
+    const arrB = Array.isArray(d) ? d : (d.book || []);
+    const arrS = Array.isArray(d) ? d : (d.seen || []);
+    let changed = false;
+    arrB.forEach(k => { if(QIDX[k] && !wrongBook.includes(k)){ wrongBook.push(k); changed = true; } });
+    arrS.forEach(k => { if(QIDX[k] && !seen.includes(k)){ seen.push(k); changed = true; } });
+    remoteFound = true;
+    if(changed) saveBook();
+  }catch(e){ remoteChecked = true; /* 未部署到网上、离线、或文件不存在时静默跳过 */ }
+}
+function downloadProgressFile(){
+  const blob = new Blob([JSON.stringify({v:2, book:wrongBook, seen:seen, at:new Date().toISOString()}, null, 1)],
+    {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'progress.json';   // 固定文件名，方便直接覆盖仓库里的同名文件
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 3000);
+}
+
 function progressPanel(){
   const has = seen.length || wrongBook.length;
+  const syncStatus = !remoteChecked ? '尚未检测' : (remoteFound ? '✓ 已连接到 GitHub 上的 progress.json，自动读取中' : '未找到 progress.json（还没上传过，或未部署到 GitHub Pages）');
   return `
   <div style="text-align:left;margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
-    <h4 style="font-size:14px;margin:0 0 6px">💾 进度码（本环境无法自动保存，请用它备份）</h4>
+    <h4 style="font-size:14px;margin:0 0 6px">🔄 与 GitHub 同步（跨设备）</h4>
+    <p class="muted" style="margin:0 0 8px">${syncStatus}</p>
+    <p class="muted" style="margin:0 0 8px">用法：练完题后点下面按钮下载 progress.json，上传到你的 GitHub 仓库覆盖同名文件；换设备打开网页时会自动读取最新进度。</p>
+    ${has ? `<button class="btn secondary" style="margin:0;padding:9px 16px;font-size:14px" onclick="downloadProgressFile()">下载 progress.json</button>`
+          : '<p class="muted" style="margin:4px 0">开始做题后这里会出现下载按钮</p>'}
+    <p class="muted" style="margin-top:8px">上传地址（把 <b>用户名/仓库名</b> 换成你自己的）：<br>
+      <code style="font-size:11.5px;word-break:break-all">github.com/用户名/仓库名/upload/main</code></p>
+
+    <h4 style="font-size:14px;margin:18px 0 6px">💾 进度码（备用，无需联网即可转移）</h4>
     ${has ? `
     <textarea id="pcode" readonly rows="3" onclick="this.select()"
       style="width:100%;font-size:11px;font-family:monospace;border:1px solid var(--line);border-radius:8px;padding:8px;word-break:break-all"
       >${encodeProgress()}</textarea>
     <button class="btn secondary" style="margin:6px 0 0;padding:8px 16px;font-size:14px" onclick="copyCode()">复制进度码</button>
-    <span class="muted" id="copytip" style="margin-left:8px"></span>` : '<p class="muted" style="margin:4px 0">开始做题后这里会生成进度码</p>'}
+    <span class="muted" id="copytip" style="margin-left:8px"></span>` : ''}
     <h4 style="font-size:14px;margin:14px 0 6px">恢复进度</h4>
     <textarea id="rcode" rows="3" placeholder="把上次保存的进度码粘贴到这里"
       style="width:100%;font-size:11px;font-family:monospace;border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
@@ -478,19 +514,16 @@ function result(){
     <br><button class="btn secondary" style="margin-top:10px" onclick="startScreen()">返回首页</button>
     ${wrongHtml}
     <div style="text-align:left;margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
-      <h4 style="font-size:14px;margin:0 0 6px">💾 离开前请复制进度码保存</h4>
-      <textarea id="pcode" readonly rows="3" onclick="this.select()"
-        style="width:100%;font-size:11px;font-family:monospace;border:1px solid var(--line);border-radius:8px;padding:8px;word-break:break-all"
-        >${encodeProgress()}</textarea>
-      <button class="btn secondary" style="margin:6px 0 0;padding:8px 16px;font-size:14px" onclick="copyCode()">复制进度码</button>
-      <span class="muted" id="copytip" style="margin-left:8px"></span>
+      <h4 style="font-size:14px;margin:0 0 6px">🔄 想在其他设备继续？同步一下</h4>
+      <button class="btn secondary" style="margin:0;padding:9px 16px;font-size:14px" onclick="downloadProgressFile()">下载 progress.json</button>
+      <p class="muted" style="margin:8px 0 0">上传到 GitHub 覆盖同名文件即可，其他设备打开网页会自动读取最新进度。</p>
     </div>
     <p class="muted">真实 BTT 考试为 50 题限时 50 分钟，需答对 45 题（90%）</p>
   </div>`;
   window.scrollTo(0,0);
 }
 
-loadBook().finally(startScreen);
+loadBook().then(syncFromRemote).catch(()=>{}).finally(startScreen);
 </script>
 </body>
 </html>
